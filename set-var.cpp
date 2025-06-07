@@ -108,7 +108,6 @@ char* getColonParam(int argc, char* argv[], const char* paramName)
     for (int i = 1; i < argc; i++) {
         if (strnicmp(argv[i], paramWithColon, strlen(paramWithColon)) == 0) {
             strcpy(buffer, argv[i] + strlen(paramWithColon));
-                   paramWithColon, buffer, buffer);
             return buffer;
         }
     }
@@ -176,10 +175,7 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    for (int i = 0; i < argc; i++) {
-        printf("  arg[%d]: [%s]\n", i, argv[i]);
-    }
-
+    // Remove debug argument printing
     // Get parameters using the new approach
     char* prompt = getPromptParam(argc, argv);
     char* variable = getColonParam(argc, argv, "V");
@@ -193,7 +189,7 @@ int main(int argc, char* argv[])
     }
     
     if (!prompt || !variable) {
-        printf("\nERROR: Required parameters missing. Use /? for help.\n");
+        printf("ERROR: Required parameters missing. Use /? for help.\n");
         return 1;
     }
     
@@ -202,15 +198,10 @@ int main(int argc, char* argv[])
         timeout = 0;
     }
 
-    // Check if variable is already set
-    char* currentValue = getenv(variable);
-    if (currentValue) {
-        printf("\nCurrent value of %s is: %s\n", variable, currentValue);
-    }
-
+    // Remove current value check
     char input[256] = {0};
     
-    printf("\n%s ", prompt);
+    printf("%s ", prompt);
     if (defaultVal) {
         printf("[%s] ", defaultVal);
     }
@@ -274,9 +265,6 @@ int main(int argc, char* argv[])
         if (batFile) {
             fprintf(batFile, "SET %s=%s\n", variable, input);            
             fclose(batFile);
-            
-            printf("Created batch file '%s' to set %s=%s\n", outputFile, variable, input);
-            printf("Run 'CALL %s' to set the environment variable.\n", outputFile);
             return 0;
         }
         else {
@@ -284,8 +272,6 @@ int main(int argc, char* argv[])
             return 1;
         }
     }
-    else {
-        printf("No input provided. Batch file not created.\n");
-        return 1;
-    }
+    
+    return 1;
 }
