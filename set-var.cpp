@@ -1,4 +1,3 @@
-#include <iostream.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,206 +5,287 @@
 #include <dos.h>
 #include <time.h>
 
-void showHelp()
+// Get the value for a command line parameter
+// For /P (prompt), collects all words until next parameter
+// For other parameters, uses standard /X:value format
+char* getParam(int argc, char* argv[], const char* paramName)
 {
-    cout << "INPUT - Prompts for input and saves to environment variable\n";
-    cout << "Syntax: INPUT /Q:\"question\" /V:variable [/D:default] [/T:timeout]\n\n";
-    cout << "  /Q:\"question\"  Text to display as prompt (use quotes for spaces)\n";
-    cout << "  /V:variable     Environment variable to store the input\n";
-    cout << "  /D:default      Default value if user enters nothing\n";
-    cout << "  /T:timeout      Timeout in seconds (1-255) before using default\n";
-    cout << "\nExample: INPUT /Q:\"Enter your name:\" /V:USERNAME /D:User /T:10\n";
+    static int bufferIndex = 0;
+    static char buffers[4][256]; // Multiple buffers for different parameters
+    
+    // Rotate through buffers to avoid overwriting previous values
+    char* buffer = buffers[bufferIndex];
+    bufferIndex = (bufferIndex + 1) % 4;
+    buffer[0] = '\0';
+    
+    int i;
+    
+    // Special handling for /P parameter - collect all words until next parameter
+    if (stricmp(paramName, "P") == 0) {
+        for (i = 1; i < argc; i++) {
+            // Check if this argument is our parameter (case-insensitive)
+            if (argv[i][0] == '/' && 
+                (stricmp(argv[i] + 1, "P") == 0 || 
+                 stricmp(argv[i] + 1, "PROMPT") == 0)) {
+                                
+                // Parameter found, now collect all subsequent arguments until next parameter
+                buffer[0] = '\0'; // Start with empty string
+                int currentPos = 0;
+                
+                // Loop through arguments after the /P parameter
+                int j;
+                for (j = i + 1; j < argc; j++) {
+                    // If we hit another parameter, stop collecting
+                    if (argv[j][0] == '/') {
+                        break;
+                    }
+                                        
+                    // If not the first word, add a space
+                    if (currentPos > 0) {
+                        buffer[currentPos++] = ' ';
+                    }
+                    
+                    // Copy this word to our buffer
+                    strcpy(buffer + currentPos, argv[j]);
+                    currentPos += strlen(argv[j]);
+                }
+                
+                // If we collected anything, return it
+                if (currentPos > 0) {
+                    return buffer;
+                }
+                                return NULL; // Parameter found but no value
+            }
+        }
+        
+        return NULL;
+    }
+    else {
+        // Standard handling for other parameters in /X:value format
+        char paramWithColon[32];
+        sprintf(paramWithColon, "/%s:", paramName);
+        
+        for (i = 1; i < argc; i++) {
+            // Check if this argument starts with our parameter prefix
+            if (strnicmp(argv[i], paramWithColon, strlen(paramWithColon)) == 0) {
+                // Extract value after the colon
+                strcpy(buffer, argv[i] + strlen(paramWithColon));
+                return buffer;
+            }
+        }
+    }
+    
+    return NULL; // Parameter not found
 }
 
-// Modified getParam function to handle quoted parameters
-char* getParam(int argc, char* argv[], const char* param)
+// Get the value for a command line parameter with colon format (/X:value)
+char* getColonParam(int argc, char* argv[], const char* paramName)
 {
-    int paramLen = strlen(param);
+    static int bufferIndex = 0;
+    static char buffers[5][256]; // Multiple buffers for different parameters
     
-    for (int i = 1; i < argc; i++)
-    {
-        if (strnicmp(argv[i], param, paramLen) == 0)
-        {
-            char* value = &argv[i][paramLen];
-            
-            // Handle quotes in parameters
-            if (*value == '"')
-            {
-                // If this parameter starts with a quote, look for the ending quote
-                value++; // Skip the opening quote
-                
-                // If this parameter has the closing quote
-                char* endQuote = strchr(value, '"');
-                if (endQuote)
-                {
-                    *endQuote = '\0'; // Null-terminate at the closing quote
-                    return value;
-                }
-                
-                // If the closing quote is in another argument (multi-part quoted string)
-                static char mergedParam[512];
-                strcpy(mergedParam, value);
-                int mergedLen = strlen(mergedParam);
-                
-                // Search next arguments for the closing quote
-                for (int j = i + 1; j < argc; j++)
-                {
-                    mergedParam[mergedLen++] = ' '; // Add space between args
-                    
-                    char* nextArg = argv[j];
-                    endQuote = strchr(nextArg, '"');
-                    
-                    if (endQuote)
-                    {
-                        // Found end quote, copy up to that point
-                        int copyLen = endQuote - nextArg;
-                        strncpy(&mergedParam[mergedLen], nextArg, copyLen);
-                        mergedParam[mergedLen + copyLen] = '\0';
-                        
-                        // Mark these arguments as used so they're not processed again
-                        for (int k = i+1; k <= j; k++)
-                        {
-                            argv[k][0] = '\0';
-                        }
-                        
-                        return mergedParam;
-                    }
-                    else
-                    {
-                        // No end quote yet, copy the whole argument
-                        strcpy(&mergedParam[mergedLen], nextArg);
-                        mergedLen += strlen(nextArg);
-                    }
-                }
-                
-                // If we get here, there was no closing quote
-                return value;
-            }
-            
-            return value;
+    // Use a specific buffer for each parameter type to avoid conflicts
+    char* buffer;
+    if (stricmp(paramName, "V") == 0) {
+        buffer = buffers[0];
+    } else if (stricmp(paramName, "D") == 0) {
+        buffer = buffers[1];
+    } else if (stricmp(paramName, "T") == 0) {
+        buffer = buffers[2];
+    } else if (stricmp(paramName, "O") == 0) {
+        buffer = buffers[3];
+    } else {
+        // For any other parameter, use the rotating buffer
+        buffer = buffers[4];
+        bufferIndex = (bufferIndex + 1) % 4;
+    }
+    
+    buffer[0] = '\0';
+    
+    char paramWithColon[32];
+    sprintf(paramWithColon, "/%s:", paramName);
+    
+    for (int i = 1; i < argc; i++) {
+        if (strnicmp(argv[i], paramWithColon, strlen(paramWithColon)) == 0) {
+            strcpy(buffer, argv[i] + strlen(paramWithColon));
+                   paramWithColon, buffer, buffer);
+            return buffer;
         }
     }
     
     return NULL;
 }
 
+// Alternative approach: separate functions for different parameter types
+char* getPromptParam(int argc, char* argv[])
+{
+    static char buffer[256];
+    buffer[0] = '\0';
+    
+    for (int i = 1; i < argc; i++) {
+        // Check for /P or /PROMPT (case insensitive)
+        if (argv[i][0] == '/' && 
+            (stricmp(argv[i] + 1, "P") == 0 || stricmp(argv[i] + 1, "PROMPT") == 0)) {
+                        
+            // Collect words until next parameter
+            buffer[0] = '\0';
+            int pos = 0;
+            
+            for (int j = i + 1; j < argc; j++) {
+                if (argv[j][0] == '/') {
+                    break;  // Stop at next parameter
+                }
+                
+                if (pos > 0) {
+                    buffer[pos++] = ' ';  // Add space between words
+                }
+                
+                strcpy(buffer + pos, argv[j]);
+                pos += strlen(argv[j]);
+            }
+            
+            return buffer[0] ? buffer : NULL;
+        }
+    }
+    
+    return NULL;  // Not found
+}
+
+void showHelp()
+{
+    printf("SET-VAR - Prompts for input and saves to environment variable\n");
+    printf("Syntax: SET-VAR /P prompt text /V:variable [/D:default] [/T:timeout] [/O:filename]\n\n");
+    printf("  /P text         Text to display as prompt (all words after /P until next parameter)\n");
+    printf("  /V:variable     Environment variable to store the input\n");
+    printf("  /D:default      Default value if user enters nothing\n");
+    printf("  /T:timeout      Timeout in seconds (1-255) before using default\n");
+    printf("  /O:filename     Output batch file name (default: SETVAR.BAT)\n");
+    printf("\nExamples:\n");
+    printf("  SET-VAR /P Enter your name: /V:USERNAME /D:User /T:10\n");
+    printf("  SET-VAR /P What is the server address? /V:SERVER_IP\n");
+    printf("\nThen run the batch file to set the variable:\n");
+    printf("CALL SETVAR.BAT\n");
+    printf("\nNote: You must CALL the batch file to set variables in the parent shell\n");
+}
+
+// Main function with the new approach
 int main(int argc, char* argv[])
 {
-    if (argc < 2 || strcmp(argv[1], "/?") == 0)
-    {
+    if (argc < 2 || (argc == 2 && strcmp(argv[1], "/?") == 0)) {
         showHelp();
         return 1;
     }
 
-    char* question = getParam(argc, argv, "/Q:");
-    char* variable = getParam(argc, argv, "/V:");
-    char* defaultVal = getParam(argc, argv, "/D:");
-    char* timeoutStr = getParam(argc, argv, "/T:");
-    
-    int timeout = 0;
-    if (timeoutStr != NULL)
-    {
-        timeout = atoi(timeoutStr);
-        if (timeout < 0 || timeout > 255)
-        {
-            timeout = 0;
-        }
+    for (int i = 0; i < argc; i++) {
+        printf("  arg[%d]: [%s]\n", i, argv[i]);
     }
 
-    if (question == NULL || variable == NULL)
-    {
-        cout << "ERROR: Required parameters missing. Use /? for help.\n";
+    // Get parameters using the new approach
+    char* prompt = getPromptParam(argc, argv);
+    char* variable = getColonParam(argc, argv, "V");
+    char* defaultVal = getColonParam(argc, argv, "D");
+    char* timeoutStr = getColonParam(argc, argv, "T");
+    char* outputFile = getColonParam(argc, argv, "O");
+    
+    // Default output file if not specified
+    if (!outputFile) {
+        outputFile = "SETVAR.BAT";
+    }
+    
+    if (!prompt || !variable) {
+        printf("\nERROR: Required parameters missing. Use /? for help.\n");
         return 1;
     }
+    
+    int timeout = timeoutStr ? atoi(timeoutStr) : 0;
+    if (timeout < 0 || timeout > 255) {
+        timeout = 0;
+    }
 
-    // Check if the environment variable is already set
+    // Check if variable is already set
     char* currentValue = getenv(variable);
-    if (currentValue != NULL)
-    {
-        cout << "Current value of " << variable << " is: " << currentValue << "\n";
+    if (currentValue) {
+        printf("\nCurrent value of %s is: %s\n", variable, currentValue);
     }
 
     char input[256] = {0};
     
-    cout << question << " ";
-    if (defaultVal != NULL)
-    {
-        cout << "[" << defaultVal << "] ";
+    printf("\n%s ", prompt);
+    if (defaultVal) {
+        printf("[%s] ", defaultVal);
     }
     
-    if ((timeout > 0) && (defaultVal != NULL))
-    {
+    if (timeout > 0 && defaultVal) {
         // Handle timeout with default value
         clock_t start = clock();
-        int timeElapsed = 0;
+        int timeLeft = timeout;
         int pos = 0;
         int ch;
         
-        while (timeElapsed < timeout)
-        {
-            if (kbhit())
-            {
+        while (timeLeft > 0) {
+            // Update countdown every second
+            int newTimeLeft = timeout - (int)((clock() - start) / CLK_TCK);
+            if (newTimeLeft != timeLeft) {
+                timeLeft = newTimeLeft;
+                printf("\r%s [%s] (%d)  ", prompt, defaultVal, timeLeft);
+            }
+            
+            if (kbhit()) {
                 ch = getch();
-                if (ch == 13) // Enter key
-                {
+                if (ch == 13) { // Enter key
                     input[pos] = '\0';
+                    printf("\n");
                     break;
                 }
-                else if ((ch == 8) && (pos > 0)) // Backspace
-                {
+                else if (ch == 8 && pos > 0) { // Backspace
                     pos--;
-                    cout << "\b \b";
+                    printf("\b \b");
                 }
-                else if ((ch >= 32) && (ch <= 126) && (pos < 255)) // Printable chars
-                {
+                else if (ch >= 32 && ch <= 126 && pos < 255) { // Printable chars
                     input[pos++] = ch;
-                    cout << (char)ch;
+                    printf("%c", ch);
                 }
             }
             
-            timeElapsed = (clock() - start) / CLK_TCK;
-            
-            // Show countdown every second
-            int currentSeconds = (clock() - start) / CLK_TCK;
-            if (timeElapsed != currentSeconds)
-            {
-                timeElapsed = currentSeconds;
-                gotoxy(wherex(), wherey());
-                cout << " (" << (timeout - timeElapsed) << ")";
+            if (timeLeft <= 0) {
+                printf("\n");
+                break;
             }
         }
-        cout << "\n";
         
-        if ((strlen(input) == 0) && (timeElapsed >= timeout))
-        {
+        if (pos == 0) { // No input provided
             strcpy(input, defaultVal);
-            cout << "Timeout - using default value: " << defaultVal << "\n";
+            printf("Timeout - using default value: %s\n", defaultVal);
         }
     }
-    else
-    {
+    else {
         // Regular input without timeout
         gets(input);
         
         // Use default if input is empty and default is provided
-        if ((strlen(input) == 0) && (defaultVal != NULL))
-        {
+        if (input[0] == '\0' && defaultVal) {
             strcpy(input, defaultVal);
         }
     }
     
-    // Set the environment variable
-    if (strlen(input) > 0)
-    {
-        char envString[512];
-        sprintf(envString, "%s=%s", variable, input);
-        putenv(envString);
-        cout << "Environment variable " << variable << " set to: " << input << "\n";
-        return 0;
+    // Create the batch file with the SET command
+    if (input[0] != '\0') {
+        FILE* batFile = fopen(outputFile, "w");
+        if (batFile) {
+            fprintf(batFile, "SET %s=%s\n", variable, input);            
+            fclose(batFile);
+            
+            printf("Created batch file '%s' to set %s=%s\n", outputFile, variable, input);
+            printf("Run 'CALL %s' to set the environment variable.\n", outputFile);
+            return 0;
+        }
+        else {
+            printf("Error: Could not create batch file '%s'.\n", outputFile);
+            return 1;
+        }
     }
-    else
-    {
-        cout << "No input provided. Environment variable not set.\n";
+    else {
+        printf("No input provided. Batch file not created.\n");
         return 1;
     }
 }
